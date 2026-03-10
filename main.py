@@ -15,32 +15,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------- ENV VARIABLES ----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID", "")
-
-# Clean Railway formatting issues
-BOT_TOKEN = BOT_TOKEN.strip().replace("=", "", 1)
-PRIVATE_GROUP_ID = PRIVATE_GROUP_ID.strip().replace("=", "", 1)
-
-print("DEBUG BOT_TOKEN:", BOT_TOKEN)
-print("DEBUG PRIVATE_GROUP_ID:", PRIVATE_GROUP_ID)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
 
 if not BOT_TOKEN:
     print("❌ BOT_TOKEN missing")
     sys.exit(1)
 
-if ":" not in BOT_TOKEN:
-    print("❌ BOT_TOKEN format invalid")
+if not PRIVATE_GROUP_ID:
+    print("❌ PRIVATE_GROUP_ID missing")
     sys.exit(1)
 
-try:
-    PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
-except:
-    print("❌ PRIVATE_GROUP_ID invalid")
-    sys.exit(1)
+PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 
 SEARCH_PREFIX = "🔍 Searching: "
-
 
 # ---------------- BOT CLASS ----------------
 class MovieBot:
@@ -51,10 +39,11 @@ class MovieBot:
         self.group_message_ids = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
         await update.message.reply_text(
             "🎬 *Movie Search Bot*\n\n"
             "Send a movie name and I'll search it.\n"
-            "_Hosted on Railway 🚀_\n"
+            "_Hosted on Railway 🚀_\n\n"
             "Example: `Inception 2010`",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -71,6 +60,7 @@ class MovieBot:
         self.pending_searches[user_id] = movie_name
 
         try:
+
             group_msg = await context.bot.send_message(
                 chat_id=PRIVATE_GROUP_ID,
                 text=f"{SEARCH_PREFIX}{movie_name}"
@@ -83,11 +73,15 @@ class MovieBot:
                 parse_mode=ParseMode.MARKDOWN
             )
 
-            print(f"Search sent to group: {movie_name}")
+            logger.info(f"Search sent to group: {movie_name}")
 
         except Exception as e:
+
             logger.error(f"Group error: {e}")
-            await update.message.reply_text("❌ Cannot access group.")
+
+            await update.message.reply_text(
+                "❌ Cannot access private group."
+            )
 
     async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -106,6 +100,7 @@ class MovieBot:
             reply_id = update.message.reply_to_message.message_id
 
             if reply_id == self.group_message_ids.get(movie_name):
+
                 await self.forward_file(movie_name, update.message)
 
     async def handle_group_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,18 +127,20 @@ class MovieBot:
             if requested.lower() == movie_name:
 
                 try:
+
                     await self.application.bot.forward_message(
                         chat_id=user_id,
                         from_chat_id=group_message.chat_id,
                         message_id=group_message.message_id
                     )
 
-                    print(f"File sent to user {user_id}")
+                    logger.info(f"File sent to user {user_id}")
 
                     del self.pending_searches[user_id]
                     self.group_message_ids.pop(movie_name, None)
 
                 except Exception as e:
+
                     logger.error(f"Forward error: {e}")
 
                 break
@@ -153,6 +150,7 @@ class MovieBot:
 async def cleanup_old_searches(bot):
 
     while True:
+
         await asyncio.sleep(300)
 
         expired = list(bot.pending_searches.keys())
@@ -160,10 +158,12 @@ async def cleanup_old_searches(bot):
         for uid in expired:
 
             try:
+
                 await bot.application.bot.send_message(
                     uid,
                     "⏰ Search expired. Try again."
                 )
+
             except:
                 pass
 
@@ -171,7 +171,7 @@ async def cleanup_old_searches(bot):
 
 
 # ---------------- MAIN ----------------
-def main():
+async def main():
 
     logger.info("Starting Movie Bot")
 
@@ -193,12 +193,12 @@ def main():
         MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
     )
 
-    application.create_task(cleanup_old_searches(bot))
+    asyncio.create_task(cleanup_old_searches(bot))
 
     logger.info("Bot running")
 
-    application.run_polling(drop_pending_updates=True)
+    await application.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
