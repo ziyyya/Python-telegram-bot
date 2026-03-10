@@ -14,9 +14,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-PRIVATE_GROUP_ID = os.environ.get("PRIVATE_GROUP_ID")
+# Read environment variables and clean them
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip().lstrip("=")
+PRIVATE_GROUP_ID = os.environ.get("PRIVATE_GROUP_ID", "").strip().lstrip("=")
 
 print("DEBUG BOT_TOKEN:", BOT_TOKEN)
 print("DEBUG PRIVATE_GROUP_ID:", PRIVATE_GROUP_ID)
@@ -25,7 +25,6 @@ if not BOT_TOKEN:
     print("❌ BOT_TOKEN missing")
     sys.exit(1)
 
-# Basic token format check
 if ":" not in BOT_TOKEN:
     print("❌ Invalid BOT_TOKEN format")
     sys.exit(1)
@@ -46,6 +45,7 @@ class MovieBot:
         self.group_message_ids = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
         await update.message.reply_text(
             "🎬 *Movie Search Bot*\n\n"
             "Send a movie name and I'll search it.\n"
@@ -82,7 +82,6 @@ class MovieBot:
             print(f"Search sent to group: {movie_name}")
 
         except Exception as e:
-
             logger.error(f"Group error: {e}")
             await update.message.reply_text("❌ Cannot access group.")
 
@@ -158,7 +157,10 @@ async def cleanup_old_searches(bot):
         for uid in expired:
 
             try:
-                await bot.application.bot.send_message(uid, "⏰ Search expired. Try again.")
+                await bot.application.bot.send_message(
+                    uid,
+                    "⏰ Search expired. Try again."
+                )
             except:
                 pass
 
@@ -187,7 +189,6 @@ def main():
         MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
     )
 
-    # Background cleanup task
     application.create_task(cleanup_old_searches(bot))
 
     logger.info("Bot running")
