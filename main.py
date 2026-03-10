@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
-# Logging
+# ---------------- LOGGING ----------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -14,9 +14,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Read environment variables and clean them
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip().lstrip("=")
-PRIVATE_GROUP_ID = os.environ.get("PRIVATE_GROUP_ID", "").strip().lstrip("=")
+# ---------------- ENV VARIABLES ----------------
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID", "")
+
+# Clean Railway formatting issues
+BOT_TOKEN = BOT_TOKEN.strip().replace("=", "", 1)
+PRIVATE_GROUP_ID = PRIVATE_GROUP_ID.strip().replace("=", "", 1)
 
 print("DEBUG BOT_TOKEN:", BOT_TOKEN)
 print("DEBUG PRIVATE_GROUP_ID:", PRIVATE_GROUP_ID)
@@ -26,17 +30,19 @@ if not BOT_TOKEN:
     sys.exit(1)
 
 if ":" not in BOT_TOKEN:
-    print("❌ Invalid BOT_TOKEN format")
+    print("❌ BOT_TOKEN format invalid")
     sys.exit(1)
 
 try:
     PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 except:
-    print("❌ Invalid PRIVATE_GROUP_ID")
+    print("❌ PRIVATE_GROUP_ID invalid")
     sys.exit(1)
 
 SEARCH_PREFIX = "🔍 Searching: "
 
+
+# ---------------- BOT CLASS ----------------
 class MovieBot:
 
     def __init__(self, application):
@@ -45,7 +51,6 @@ class MovieBot:
         self.group_message_ids = {}
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
         await update.message.reply_text(
             "🎬 *Movie Search Bot*\n\n"
             "Send a movie name and I'll search it.\n"
@@ -66,7 +71,6 @@ class MovieBot:
         self.pending_searches[user_id] = movie_name
 
         try:
-
             group_msg = await context.bot.send_message(
                 chat_id=PRIVATE_GROUP_ID,
                 text=f"{SEARCH_PREFIX}{movie_name}"
@@ -128,7 +132,6 @@ class MovieBot:
             if requested.lower() == movie_name:
 
                 try:
-
                     await self.application.bot.forward_message(
                         chat_id=user_id,
                         from_chat_id=group_message.chat_id,
@@ -146,10 +149,10 @@ class MovieBot:
                 break
 
 
+# ---------------- CLEANUP TASK ----------------
 async def cleanup_old_searches(bot):
 
     while True:
-
         await asyncio.sleep(300)
 
         expired = list(bot.pending_searches.keys())
@@ -167,6 +170,7 @@ async def cleanup_old_searches(bot):
             bot.pending_searches.pop(uid, None)
 
 
+# ---------------- MAIN ----------------
 def main():
 
     logger.info("Starting Movie Bot")
