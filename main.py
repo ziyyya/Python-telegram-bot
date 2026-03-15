@@ -13,7 +13,7 @@ filters,
 ContextTypes
 )
 
----------------- LOGGING ----------------
+#---------------- LOGGING ----------------
 
 logging.basicConfig(
 format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -22,7 +22,7 @@ level=logging.INFO
 
 logger = logging.getLogger(name)
 
----------------- ENV ----------------
+#---------------- ENV ----------------
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -43,7 +43,7 @@ if not BOT_TOKEN:
 print("BOT_TOKEN missing")
 sys.exit(1)
 
----------------- DATABASE ----------------
+#---------------- DATABASE ----------------
 
 conn = sqlite3.connect("movies.db")
 cursor = conn.cursor()
@@ -57,14 +57,14 @@ message_id INTEGER
 
 conn.commit()
 
----------------- BOT CLASS ----------------
+#---------------- BOT CLASS ----------------
 
 class MovieBot:
 
 def __init__(self, application):  
     self.application = application  
 
-# ---------------- JOIN BUTTONS ----------------  
+# ---------------- JOIN BUTTONS ---------------- #
 def join_buttons(self):  
 
     keyboard = [  
@@ -75,7 +75,7 @@ def join_buttons(self):
 
     return InlineKeyboardMarkup(keyboard)  
 
-# ---------------- CHECK MEMBERSHIP ----------------  
+# ---------------- CHECK MEMBERSHIP ---------------- 
 async def check_membership(self, user_id, context):  
 
     try:  
@@ -211,7 +211,7 @@ async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Indexed movie: {file_name}")
 
----------------- MAIN ----------------
+#---------------- MAIN ----------------
 
 def main():
 
