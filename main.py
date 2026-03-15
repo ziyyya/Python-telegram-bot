@@ -1,3 +1,16 @@
+import sqlite3
+
+conn = sqlite3.connect("movies.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS movies(
+file_name TEXT,
+message_id INTEGER
+)
+""")
+
+conn.commit()
 import asyncio
 import logging
 import os
@@ -46,41 +59,49 @@ class MovieBot:
             "Example: `Inception 2010`",
             parse_mode=ParseMode.MARKDOWN
         )
+    async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    async def handle_movie_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != PRIVATE_GROUP_ID:
+        return
 
-        user_id = update.effective_user.id
-        movie_name = update.message.text.strip()
+    if not update.message.document:
+        return
 
-        if len(movie_name) > 100:
-            await update.message.reply_text("❌ Movie name too long!")
-            return
+    file_name = update.message.document.file_name.lower()
+    message_id = update.message.message_id
 
-        self.pending_searches[user_id] = movie_name
+    cursor.execute(
+        "INSERT INTO movies VALUES (?,?)",
+        (file_name, message_id)
+    )
 
-        try:
+    conn.commit()
 
-            group_msg = await context.bot.send_message(
-                chat_id=PRIVATE_GROUP_ID,
-                text=movie_name
-            )
+    logger.info(f"Indexed movie: {file_name}")
+async def handle_movie_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-            self.group_message_ids[movie_name.lower()] = group_msg.message_id
+    movie_name = update.message.text.lower()
 
-            await update.message.reply_text(
-                f"🔎 Searching for *{movie_name}*...\n⏳ Waiting for file...",
-                parse_mode=ParseMode.MARKDOWN
-            )
+    cursor.execute(
+        "SELECT message_id,file_name FROM movies WHERE file_name LIKE ?",
+        ('%' + movie_name + '%',)
+    )
 
-            logger.info(f"Search sent to group: {movie_name}")
+    results = cursor.fetchall()
 
-        except Exception as e:
+    if not results:
+        await update.message.reply_text("❌ Movie not found.")
+        return
 
-            logger.error(f"Group error: {e}")
+    await update.message.reply_text("🎬 Movie found! Sending...")
 
-            await update.message.reply_text(
-                "❌ Cannot access private group."
-            )
+    for message_id, file_name in results[:3]:
+
+        await context.bot.forward_message(
+            chat_id=update.effective_user.id,
+            from_chat_id=PRIVATE_GROUP_ID,
+            message_id=message_id
+        )
 
     async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -192,6 +213,9 @@ def main():
     application.bot_data["movie_bot"] = bot
 
     application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(
+    MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.index_movie)
+    )
 
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_movie_search)
