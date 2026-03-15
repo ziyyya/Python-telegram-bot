@@ -51,6 +51,7 @@ language TEXT
 
 conn.commit()
 
+
 # ---------------- BOT CLASS ----------------
 class MovieBot:
 
@@ -260,11 +261,18 @@ class MovieBot:
         if update.effective_chat.id != PRIVATE_GROUP_ID:
             return
 
-        if not update.message.document:
-            return
-
-        file_name = update.message.document.file_name.lower()
         message_id = update.message.message_id
+
+        # if file uploaded
+        if update.message.document:
+            file_name = update.message.document.file_name.lower()
+
+        # if text / telegram link
+        elif update.message.text:
+            file_name = update.message.text.lower()
+
+        else:
+            return
 
         language = self.detect_language(file_name)
 
@@ -275,7 +283,8 @@ class MovieBot:
 
         conn.commit()
 
-        logger.info(f"Indexed movie: {file_name} ({language})")
+        logger.info(f"Indexed: {file_name}")
+
 
 # ---------------- MAIN ----------------
 def main():
@@ -300,7 +309,7 @@ def main():
 
     application.add_handler(
         MessageHandler(
-            filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL,
+            filters.Chat(PRIVATE_GROUP_ID) & (filters.Document.ALL | filters.TEXT),
             bot.index_movie
         )
     )
@@ -308,6 +317,7 @@ def main():
     logger.info("Bot running...")
 
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()
