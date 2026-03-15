@@ -63,24 +63,24 @@ class MovieBot:
         keyboard = []
 
         if FORCE_CHANNEL:
-            keyboard.append(
-                [InlineKeyboardButton(
+            keyboard.append([
+                InlineKeyboardButton(
                     "📢 Join Channel",
                     url=f"https://t.me/{FORCE_CHANNEL.replace('@','')}"
-                )]
-            )
+                )
+            ])
 
         if FORCE_GROUP:
-            keyboard.append(
-                [InlineKeyboardButton(
+            keyboard.append([
+                InlineKeyboardButton(
                     "💬 Join Group",
                     url=f"https://t.me/{FORCE_GROUP.replace('@','')}"
-                )]
-            )
+                )
+            ])
 
-        keyboard.append(
-            [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
-        )
+        keyboard.append([
+            InlineKeyboardButton("✅ I Joined", callback_data="check_join")
+        ])
 
         return InlineKeyboardMarkup(keyboard)
 
@@ -90,25 +90,25 @@ class MovieBot:
         try:
 
             if FORCE_CHANNEL_ID:
-                channel_member = await context.bot.get_chat_member(
+                member = await context.bot.get_chat_member(
                     FORCE_CHANNEL_ID, user_id
                 )
 
-                if channel_member.status in ["left", "kicked"]:
+                if member.status in ["left", "kicked"]:
                     return False
 
             if FORCE_GROUP_ID:
-                group_member = await context.bot.get_chat_member(
+                member = await context.bot.get_chat_member(
                     FORCE_GROUP_ID, user_id
                 )
 
-                if group_member.status in ["left", "kicked"]:
+                if member.status in ["left", "kicked"]:
                     return False
 
             return True
 
         except Exception as e:
-            logger.error(f"Membership check error: {e}")
+            logger.error(e)
             return False
 
     # ---------------- START ----------------
@@ -130,7 +130,7 @@ class MovieBot:
             "🎬 Movie Search Bot\n\nSend a movie name."
         )
 
-    # ---------------- BUTTON CHECK ----------------
+    # ---------------- BUTTON VERIFY ----------------
     async def check_join_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         query = update.callback_query
@@ -143,13 +143,13 @@ class MovieBot:
         if joined:
 
             await query.edit_message_text(
-                "✅ Verification successful!\n\nNow send the movie name."
+                "✅ Verified!\n\nSend movie name."
             )
 
         else:
 
             await query.answer(
-                "❌ You still haven't joined the channel or group!",
+                "❌ Join the channel and group first.",
                 show_alert=True
             )
 
@@ -171,7 +171,7 @@ class MovieBot:
         query = update.message.text.lower()
 
         cursor.execute(
-            "SELECT message_id,chat_id,file_name FROM movies WHERE file_name LIKE ?",
+            "SELECT message_id,chat_id FROM movies WHERE file_name LIKE ?",
             ('%' + query + '%',)
         )
 
@@ -179,9 +179,9 @@ class MovieBot:
 
         if results:
 
-            await update.message.reply_text("🎬 Movie found! Sending file...")
+            await update.message.reply_text("🎬 Movie found!")
 
-            for message_id, chat_id, name in results[:5]:
+            for message_id, chat_id in results[:5]:
 
                 await context.bot.copy_message(
                     chat_id=user_id,
@@ -192,23 +192,17 @@ class MovieBot:
         else:
 
             await update.message.reply_text(
-                "❌ Movie not found. Request sent."
+                "❌ Movie not found."
             )
 
             if REQUEST_CHANNEL_ID:
 
-                try:
+                await context.bot.send_message(
+                    chat_id=REQUEST_CHANNEL_ID,
+                    text=query
+                )
 
-                    await context.bot.send_message(
-                        chat_id=REQUEST_CHANNEL_ID,
-                        text=query
-                    )
-
-                except Exception as e:
-
-                    logger.error(f"Request channel error: {e}")
-
-    # ---------------- AUTO INDEX NEW FILES ----------------
+    # ---------------- AUTO INDEX MOVIES ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
@@ -220,7 +214,7 @@ class MovieBot:
             file_name = msg.document.file_name.lower()
 
         elif msg.video:
-            file_name = msg.video.file_name or "video_movie"
+            file_name = msg.video.file_name or "movie"
 
         else:
             return
@@ -235,70 +229,7 @@ class MovieBot:
 
         conn.commit()
 
-        logger.info(f"Indexed movie: {file_name}")
-
-    # ---------------- ADD EXISTING MOVIES ----------------
-    async def add_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        if update.effective_chat.id != PRIVATE_GROUP_ID:
-            return
-
-        if len(context.args) < 2:
-
-            await update.message.reply_text(
-                "Usage:\n/add message_id movie_name"
-            )
-            return
-
-        message_id = int(context.args[0])
-        movie_name = " ".join(context.args[1:]).lower()
-
-        cursor.execute(
-            "INSERT INTO movies VALUES (?,?,?)",
-            (movie_name, message_id, PRIVATE_GROUP_ID)
-        )
-
-        conn.commit()
-
-        await update.message.reply_text("✅ Movie added to database")
-
-    # ---------------- LIST MOVIES ----------------
-    async def list_movies(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        cursor.execute("SELECT file_name,message_id FROM movies LIMIT 20")
-
-        rows = cursor.fetchall()
-
-        if not rows:
-
-            await update.message.reply_text("Database empty")
-            return
-
-        text = "🎬 Movies in DB:\n\n"
-
-        for name, msg_id in rows:
-
-            text += f"{name} -> {msg_id}\n"
-
-        await update.message.reply_text(text)
-
-    # ---------------- DELETE MOVIE ----------------
-    async def delete_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        if not context.args:
-            await update.message.reply_text("Usage: /delete movie_name")
-            return
-
-        movie = " ".join(context.args).lower()
-
-        cursor.execute(
-            "DELETE FROM movies WHERE file_name LIKE ?",
-            ('%' + movie + '%',)
-        )
-
-        conn.commit()
-
-        await update.message.reply_text("🗑 Movie deleted")
+        logger.info(f"Indexed: {file_name}")
 
 # ---------------- MAIN ----------------
 def main():
@@ -308,9 +239,6 @@ def main():
     bot = MovieBot(application)
 
     application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CommandHandler("add", bot.add_movie))
-    application.add_handler(CommandHandler("list", bot.list_movies))
-    application.add_handler(CommandHandler("delete", bot.delete_movie))
 
     application.add_handler(
         CallbackQueryHandler(bot.check_join_button, pattern="check_join")
@@ -330,7 +258,8 @@ def main():
 
     logger.info("Bot running...")
 
-    application.run_polling()
+    application.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
