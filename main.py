@@ -3,8 +3,20 @@ import os
 import sys
 import sqlite3
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes
+)
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(
@@ -19,9 +31,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
 REQUEST_CHANNEL_ID = os.getenv("REQUEST_CHANNEL_ID")
 
-# FORCE JOIN USERNAMES
-FORCE_CHANNEL = os.getenv("FORCE_CHANNEL")   # example @mychannel
-FORCE_GROUP = os.getenv("FORCE_GROUP")       # example @mygroup
+FORCE_CHANNEL = os.getenv("FORCE_CHANNEL")
+FORCE_GROUP = os.getenv("FORCE_GROUP")
 
 if not BOT_TOKEN:
     print("BOT_TOKEN missing")
@@ -51,17 +62,25 @@ message_id INTEGER
 
 conn.commit()
 
-
 # ---------------- BOT CLASS ----------------
 class MovieBot:
 
     def __init__(self, application):
         self.application = application
 
-    # ---------------- CHECK JOIN ----------------
-    async def check_membership(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ---------------- JOIN BUTTONS ----------------
+    def join_buttons(self):
 
-        user_id = update.effective_user.id
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FORCE_CHANNEL.replace('@','')}")],
+            [InlineKeyboardButton("💬 Join Group", url=f"https://t.me/{FORCE_GROUP.replace('@','')}")],
+            [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
+        ])
+
+        return keyboard
+
+    # ---------------- CHECK MEMBERSHIP ----------------
+    async def check_membership(self, user_id, context):
 
         try:
             channel = await context.bot.get_chat_member(FORCE_CHANNEL, user_id)
@@ -81,14 +100,14 @@ class MovieBot:
     # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        joined = await self.check_membership(update, context)
+        user_id = update.effective_user.id
+        joined = await self.check_membership(user_id, context)
 
         if not joined:
+
             await update.message.reply_text(
-                "🚫 You must join our channel and group first!\n\n"
-                f"📢 Channel: https://t.me/{FORCE_CHANNEL.replace('@','')}\n"
-                f"💬 Group: https://t.me/{FORCE_GROUP.replace('@','')}\n\n"
-                "After joining send /start again."
+                "🚫 You must join our channel and group first!",
+                reply_markup=self.join_buttons()
             )
             return
 
@@ -96,16 +115,40 @@ class MovieBot:
             "🎬 Movie Search Bot\n\nSend a movie name."
         )
 
+    # ---------------- CHECK JOIN BUTTON ----------------
+    async def check_join_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        query = update.callback_query
+        user_id = query.from_user.id
+
+        await query.answer()
+
+        joined = await self.check_membership(user_id, context)
+
+        if joined:
+
+            await query.edit_message_text(
+                "✅ Thank you for joining!\n\nNow send the movie name."
+            )
+
+        else:
+
+            await query.answer(
+                "❌ You haven't joined yet!",
+                show_alert=True
+            )
+
     # ---------------- SEARCH MOVIE ----------------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        joined = await self.check_membership(update, context)
+        user_id = update.effective_user.id
+        joined = await self.check_membership(user_id, context)
 
         if not joined:
+
             await update.message.reply_text(
-                "🚫 Join our channel and group first!\n\n"
-                f"📢 https://t.me/{FORCE_CHANNEL.replace('@','')}\n"
-                f"💬 https://t.me/{FORCE_GROUP.replace('@','')}"
+                "🚫 Join our channel and group first!",
+                reply_markup=self.join_buttons()
             )
             return
 
@@ -126,7 +169,7 @@ class MovieBot:
             for message_id, name in results[:3]:
 
                 await context.bot.forward_message(
-                    chat_id=update.effective_user.id,
+                    chat_id=user_id,
                     from_chat_id=PRIVATE_GROUP_ID,
                     message_id=message_id
                 )
@@ -139,12 +182,14 @@ class MovieBot:
         )
 
         try:
+
             await context.bot.send_message(
                 chat_id=REQUEST_CHANNEL_ID,
                 text=f"🎬 Movie Request:\n{query}"
             )
 
         except Exception as e:
+
             logger.error(f"Request channel error: {e}")
 
     # ---------------- INDEX MOVIES ----------------
@@ -168,7 +213,6 @@ class MovieBot:
 
         logger.info(f"Indexed movie: {file_name}")
 
-
 # ---------------- MAIN ----------------
 def main():
 
@@ -179,17 +223,23 @@ def main():
     application.add_handler(CommandHandler("start", bot.start))
 
     application.add_handler(
+        CallbackQueryHandler(bot.check_join_button, pattern="check_join")
+    )
+
+    application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search_movie)
     )
 
     application.add_handler(
-        MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.index_movie)
+        MessageHandler(
+            filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL,
+            bot.index_movie
+        )
     )
 
     logger.info("Bot running...")
 
     application.run_polling()
-
 
 if __name__ == "__main__":
     main()
