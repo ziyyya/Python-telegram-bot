@@ -46,7 +46,7 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS movies(
 file_name TEXT,
-message_id INTEGER,
+message_id INTEGER UNIQUE,
 chat_id INTEGER
 )
 """)
@@ -74,12 +74,12 @@ class MovieBot:
                 "query": movie
             }
 
-            r = requests.get(url, params=params).json()
+            r = requests.get(url, params=params, timeout=10).json()
 
-            if not r["results"]:
+            if not r.get("results"):
                 return
 
-            poster = r["results"][0]["poster_path"]
+            poster = r["results"][0].get("poster_path")
 
             if not poster:
                 return
@@ -92,7 +92,7 @@ class MovieBot:
             )
 
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Poster error: {e}")
 
     # ---------------- JOIN BUTTONS ----------------
     def join_buttons(self):
@@ -145,7 +145,7 @@ class MovieBot:
             return True
 
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Membership error: {e}")
             return False
 
     # ---------------- START ----------------
@@ -171,11 +171,10 @@ class MovieBot:
 
         movie = update.message.text.lower()
 
-        # send poster first
         await self.send_movie_poster(update, movie)
 
         cursor.execute(
-            "SELECT file_name FROM movies WHERE file_name LIKE ?",
+            "SELECT file_name FROM movies WHERE file_name LIKE ? LIMIT 50",
             ('%' + movie + '%',)
         )
 
@@ -188,6 +187,8 @@ class MovieBot:
         languages = set()
 
         for (name,) in results:
+
+            name = name.lower()
 
             if "malayalam" in name:
                 languages.add("Malayalam")
@@ -233,7 +234,12 @@ class MovieBot:
             language = data[2]
 
             cursor.execute(
-                "SELECT file_name FROM movies WHERE file_name LIKE ? AND file_name LIKE ?",
+                """
+                SELECT file_name FROM movies
+                WHERE file_name LIKE ?
+                AND file_name LIKE ?
+                LIMIT 50
+                """,
                 ('%' + movie + '%', '%' + language + '%')
             )
 
@@ -243,13 +249,15 @@ class MovieBot:
 
             for (name,) in results:
 
+                name = name.lower()
+
                 if "1080" in name:
                     qualities.add("1080p")
 
-                elif "720" in name:
+                if "720" in name:
                     qualities.add("720p")
 
-                elif "480" in name:
+                if "480" in name:
                     qualities.add("480p")
 
             if not qualities:
@@ -283,6 +291,7 @@ class MovieBot:
                 WHERE file_name LIKE ?
                 AND file_name LIKE ?
                 AND file_name LIKE ?
+                LIMIT 5
                 """,
                 ('%' + movie + '%', '%' + language + '%', '%' + quality + '%')
             )
@@ -315,13 +324,13 @@ class MovieBot:
             file_name = msg.document.file_name.lower()
 
         elif msg.video:
-            file_name = msg.video.file_name or "movie"
+            file_name = (msg.video.file_name or "movie").lower()
 
         else:
             return
 
         cursor.execute(
-            "INSERT INTO movies VALUES (?,?,?)",
+            "INSERT OR IGNORE INTO movies VALUES (?,?,?)",
             (file_name, msg.message_id, update.effective_chat.id)
         )
 
