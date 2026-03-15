@@ -1,5 +1,39 @@
+import asyncio
+import logging
+import os
+import sys
 import sqlite3
 
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
+
+
+# ---------------- LOGGING ----------------
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------- ENV ----------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
+
+if not BOT_TOKEN:
+    print("BOT_TOKEN missing")
+    sys.exit(1)
+
+if not PRIVATE_GROUP_ID:
+    print("PRIVATE_GROUP_ID missing")
+    sys.exit(1)
+
+PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
+
+
+# ---------------- DATABASE ----------------
 conn = sqlite3.connect("movies.db")
 cursor = conn.cursor()
 
@@ -11,227 +45,89 @@ message_id INTEGER
 """)
 
 conn.commit()
-import asyncio
-import logging
-import os
-import sys
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.constants import ParseMode
 
-# ---------------- LOGGING ----------------
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger(__name__)
-
-# ---------------- ENV VARIABLES ----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
-
-if not BOT_TOKEN:
-    print("❌ BOT_TOKEN missing")
-    sys.exit(1)
-
-if not PRIVATE_GROUP_ID:
-    print("❌ PRIVATE_GROUP_ID missing")
-    sys.exit(1)
-
-PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
-
-SEARCH_PREFIX = "🔍 Searching: "
 
 # ---------------- BOT CLASS ----------------
 class MovieBot:
 
     def __init__(self, application):
         self.application = application
-        self.pending_searches = {}
-        self.group_message_ids = {}
 
+    # START
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
-            "🎬 *Movie Search Bot*\n\n"
-            "Send a movie name and I'll search it.\n"
-            "Example: `Inception 2010`",
-            parse_mode=ParseMode.MARKDOWN
+            "🎬 Movie Search Bot\n\nSend a movie name."
         )
+
+    # SEARCH MOVIE
+    async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        query = update.message.text.lower()
+
+        cursor.execute(
+            "SELECT message_id,file_name FROM movies WHERE file_name LIKE ?",
+            ('%' + query + '%',)
+        )
+
+        results = cursor.fetchall()
+
+        if not results:
+            await update.message.reply_text("❌ Movie not found.")
+            return
+
+        await update.message.reply_text("🎬 Movie found! Sending file...")
+
+        for message_id, name in results[:3]:
+
+            await context.bot.forward_message(
+                chat_id=update.effective_user.id,
+                from_chat_id=PRIVATE_GROUP_ID,
+                message_id=message_id
+            )
+
+    # INDEX FILES
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if update.effective_chat.id != PRIVATE_GROUP_ID:
-        return
+        if update.effective_chat.id != PRIVATE_GROUP_ID:
+            return
 
-    if not update.message.document:
-        return
+        if not update.message.document:
+            return
 
-    file_name = update.message.document.file_name.lower()
-    message_id = update.message.message_id
+        file_name = update.message.document.file_name.lower()
+        message_id = update.message.message_id
 
-    cursor.execute(
-        "INSERT INTO movies VALUES (?,?)",
-        (file_name, message_id)
-    )
-
-    conn.commit()
-
-    logger.info(f"Indexed movie: {file_name}")
-async def handle_movie_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    movie_name = update.message.text.lower()
-
-    cursor.execute(
-        "SELECT message_id,file_name FROM movies WHERE file_name LIKE ?",
-        ('%' + movie_name + '%',)
-    )
-
-    results = cursor.fetchall()
-
-    if not results:
-        await update.message.reply_text("❌ Movie not found.")
-        return
-
-    await update.message.reply_text("🎬 Movie found! Sending...")
-
-    for message_id, file_name in results[:3]:
-
-        await context.bot.forward_message(
-            chat_id=update.effective_user.id,
-            from_chat_id=PRIVATE_GROUP_ID,
-            message_id=message_id
+        cursor.execute(
+            "INSERT INTO movies VALUES (?,?)",
+            (file_name, message_id)
         )
 
-    async def handle_group_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        conn.commit()
 
-        if update.effective_chat.id != PRIVATE_GROUP_ID:
-            return
-
-        text = update.message.text or ""
-
-        if not text.startswith(SEARCH_PREFIX):
-            return
-
-        movie_name = text.replace(SEARCH_PREFIX, "").strip().lower()
-
-        if update.message.reply_to_message:
-
-            reply_id = update.message.reply_to_message.message_id
-
-            if reply_id == self.group_message_ids.get(movie_name):
-
-                await self.forward_file(movie_name, update.message)
-
-    async def handle_group_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        if update.effective_chat.id != PRIVATE_GROUP_ID:
-            return
-
-        if not update.message.reply_to_message:
-            return
-
-        text = update.message.reply_to_message.text or ""
-
-        if not text.startswith(SEARCH_PREFIX):
-            return
-
-        movie_name = text.replace(SEARCH_PREFIX, "").strip().lower()
-
-        await self.forward_file(movie_name, update.message)
-
-    async def forward_file(self, movie_name, group_message):
-
-        for user_id, requested in list(self.pending_searches.items()):
-
-            if requested.lower() == movie_name:
-
-                try:
-
-                    await self.application.bot.forward_message(
-                        chat_id=user_id,
-                        from_chat_id=group_message.chat_id,
-                        message_id=group_message.message_id
-                    )
-
-                    logger.info(f"File sent to user {user_id}")
-
-                    del self.pending_searches[user_id]
-                    self.group_message_ids.pop(movie_name, None)
-
-                except Exception as e:
-
-                    logger.error(f"Forward error: {e}")
-
-                break
-
-
-# ---------------- CLEANUP TASK ----------------
-async def cleanup_old_searches(bot):
-
-    while True:
-
-        await asyncio.sleep(300)
-
-        expired = list(bot.pending_searches.keys())
-
-        for uid in expired:
-
-            try:
-                await bot.application.bot.send_message(
-                    uid,
-                    "⏰ Search expired. Try again."
-                )
-            except:
-                pass
-
-            bot.pending_searches.pop(uid, None)
-
-
-# ---------------- POST INIT ----------------
-async def post_init(application: Application):
-
-    bot = application.bot_data["movie_bot"]
-
-    application.create_task(cleanup_old_searches(bot))
+        logger.info(f"Indexed movie: {file_name}")
 
 
 # ---------------- MAIN ----------------
 def main():
 
-    logger.info("Starting Movie Bot")
-
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    application = Application.builder().token(BOT_TOKEN).build()
 
     bot = MovieBot(application)
 
-    application.bot_data["movie_bot"] = bot
-
     application.add_handler(CommandHandler("start", bot.start))
+
     application.add_handler(
-    MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.index_movie)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search_movie)
     )
 
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_movie_search)
-    )
-
-    application.add_handler(
-        MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.TEXT, bot.handle_group_message)
-    )
-
-    application.add_handler(
-        MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
+        MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.index_movie)
     )
 
     logger.info("Bot running...")
 
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling()
 
 
 if __name__ == "__main__":
