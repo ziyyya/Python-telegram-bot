@@ -208,7 +208,7 @@ class MovieBot:
 
                     logger.error(f"Request channel error: {e}")
 
-    # ---------------- INDEX MOVIES ----------------
+    # ---------------- AUTO INDEX NEW FILES ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
@@ -237,6 +237,69 @@ class MovieBot:
 
         logger.info(f"Indexed movie: {file_name}")
 
+    # ---------------- ADD EXISTING MOVIES ----------------
+    async def add_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        if update.effective_chat.id != PRIVATE_GROUP_ID:
+            return
+
+        if len(context.args) < 2:
+
+            await update.message.reply_text(
+                "Usage:\n/add message_id movie_name"
+            )
+            return
+
+        message_id = int(context.args[0])
+        movie_name = " ".join(context.args[1:]).lower()
+
+        cursor.execute(
+            "INSERT INTO movies VALUES (?,?,?)",
+            (movie_name, message_id, PRIVATE_GROUP_ID)
+        )
+
+        conn.commit()
+
+        await update.message.reply_text("✅ Movie added to database")
+
+    # ---------------- LIST MOVIES ----------------
+    async def list_movies(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        cursor.execute("SELECT file_name,message_id FROM movies LIMIT 20")
+
+        rows = cursor.fetchall()
+
+        if not rows:
+
+            await update.message.reply_text("Database empty")
+            return
+
+        text = "🎬 Movies in DB:\n\n"
+
+        for name, msg_id in rows:
+
+            text += f"{name} -> {msg_id}\n"
+
+        await update.message.reply_text(text)
+
+    # ---------------- DELETE MOVIE ----------------
+    async def delete_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        if not context.args:
+            await update.message.reply_text("Usage: /delete movie_name")
+            return
+
+        movie = " ".join(context.args).lower()
+
+        cursor.execute(
+            "DELETE FROM movies WHERE file_name LIKE ?",
+            ('%' + movie + '%',)
+        )
+
+        conn.commit()
+
+        await update.message.reply_text("🗑 Movie deleted")
+
 # ---------------- MAIN ----------------
 def main():
 
@@ -245,6 +308,9 @@ def main():
     bot = MovieBot(application)
 
     application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CommandHandler("add", bot.add_movie))
+    application.add_handler(CommandHandler("list", bot.list_movies))
+    application.add_handler(CommandHandler("delete", bot.delete_movie))
 
     application.add_handler(
         CallbackQueryHandler(bot.check_join_button, pattern="check_join")
@@ -265,7 +331,6 @@ def main():
     logger.info("Bot running...")
 
     application.run_polling()
-
 
 if __name__ == "__main__":
     main()
