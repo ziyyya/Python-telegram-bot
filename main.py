@@ -91,7 +91,7 @@ class MovieBot:
             return
 
         # ---------- MOVIE NOT FOUND ----------
-        await update.message.reply_text("❌ Movie not found. Request sent.")
+        await update.message.reply_text("❌ Movie not found. Request sent next time we will add sorry😔.")
 
         try:
             await context.bot.send_message(
