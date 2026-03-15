@@ -193,9 +193,10 @@ async def main():
         MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
     )
 
-    asyncio.create_task(cleanup_old_searches(bot))
+    # Correct background task
+    application.create_task(cleanup_old_searches(bot))
 
-    logger.info("Bot running")
+    logger.info("Bot running...")
 
     await application.run_polling(drop_pending_updates=True)
 
