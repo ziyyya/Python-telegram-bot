@@ -24,14 +24,14 @@ logger = logging.getLogger(__name__)
 # ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID"))
-REQUEST_CHANNEL_ID = int(os.getenv("REQUEST_CHANNEL_ID"))
+PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID", "0"))
+REQUEST_CHANNEL_ID = int(os.getenv("REQUEST_CHANNEL_ID", "0"))
 
-FORCE_CHANNEL_ID = int(os.getenv("FORCE_CHANNEL_ID"))
-FORCE_GROUP_ID = int(os.getenv("FORCE_GROUP_ID"))
+FORCE_CHANNEL_ID = int(os.getenv("FORCE_CHANNEL_ID", "0"))
+FORCE_GROUP_ID = int(os.getenv("FORCE_GROUP_ID", "0"))
 
-FORCE_CHANNEL = os.getenv("FORCE_CHANNEL")
-FORCE_GROUP = os.getenv("FORCE_GROUP")
+FORCE_CHANNEL = os.getenv("FORCE_CHANNEL", "")
+FORCE_GROUP = os.getenv("FORCE_GROUP", "")
 
 if not BOT_TOKEN:
     print("BOT_TOKEN missing")
@@ -51,7 +51,6 @@ language TEXT
 
 conn.commit()
 
-
 # ---------------- BOT CLASS ----------------
 class MovieBot:
 
@@ -63,19 +62,15 @@ class MovieBot:
 
         name = file_name.lower()
 
-        if "malayalam" in name or "mal" in name:
+        if "malayalam" in name or " mal " in name:
             return "malayalam"
-
         elif "tamil" in name:
             return "tamil"
-
         elif "hindi" in name:
             return "hindi"
-
         elif "telugu" in name:
             return "telugu"
-
-        elif "eng" in name or "english" in name:
+        elif "english" in name or "eng" in name:
             return "english"
 
         return "unknown"
@@ -96,6 +91,9 @@ class MovieBot:
 
         try:
 
+            if FORCE_CHANNEL_ID == 0 or FORCE_GROUP_ID == 0:
+                return True
+
             channel_member = await context.bot.get_chat_member(FORCE_CHANNEL_ID, user_id)
             group_member = await context.bot.get_chat_member(FORCE_GROUP_ID, user_id)
 
@@ -113,6 +111,9 @@ class MovieBot:
 
     # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        if not update.message:
+            return
 
         user_id = update.effective_user.id
 
@@ -134,9 +135,9 @@ class MovieBot:
     async def check_join_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         query = update.callback_query
-        user_id = query.from_user.id
-
         await query.answer()
+
+        user_id = query.from_user.id
 
         joined = await self.check_membership(user_id, context)
 
@@ -156,6 +157,9 @@ class MovieBot:
     # ---------------- SEARCH MOVIE ----------------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+        if not update.message:
+            return
+
         user_id = update.effective_user.id
 
         joined = await self.check_membership(user_id, context)
@@ -168,7 +172,7 @@ class MovieBot:
             )
             return
 
-        query = update.message.text.lower()
+        query = update.message.text.lower().strip()
 
         cursor.execute(
             "SELECT language FROM movies WHERE file_name LIKE ?",
@@ -183,13 +187,14 @@ class MovieBot:
                 "❌ Movie not found. Request sent."
             )
 
-            try:
-                await context.bot.send_message(
-                    chat_id=REQUEST_CHANNEL_ID,
-                    text=query
-                )
-            except Exception as e:
-                logger.error(f"Request channel error: {e}")
+            if REQUEST_CHANNEL_ID != 0:
+                try:
+                    await context.bot.send_message(
+                        chat_id=REQUEST_CHANNEL_ID,
+                        text=query
+                    )
+                except Exception as e:
+                    logger.error(f"Request channel error: {e}")
 
             return
 
@@ -249,6 +254,9 @@ class MovieBot:
     # ---------------- INDEX MOVIES ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+        if not update.message:
+            return
+
         if update.effective_chat.id != PRIVATE_GROUP_ID:
             return
 
@@ -268,7 +276,6 @@ class MovieBot:
         conn.commit()
 
         logger.info(f"Indexed movie: {file_name} ({language})")
-
 
 # ---------------- MAIN ----------------
 def main():
@@ -301,7 +308,6 @@ def main():
     logger.info("Bot running...")
 
     application.run_polling()
-
 
 if __name__ == "__main__":
     main()
