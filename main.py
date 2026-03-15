@@ -5,47 +5,42 @@ import sqlite3
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-Application,
-CommandHandler,
-MessageHandler,
-CallbackQueryHandler,
-filters,
-ContextTypes
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes
 )
 
-#---------------- LOGGING ----------------
-
+# ---------------- LOGGING ----------------
 logging.basicConfig(
-format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 
-logger = logging.getLogger(name)
+logger = logging.getLogger(__name__)
 
-#---------------- ENV ----------------
-
+# ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID"))
-REQUEST_CHANNEL_ID = int(os.getenv("REQUEST_CHANNEL_ID"))
+PRIVATE_GROUP_ID = int(os.getenv("PRIVATE_GROUP_ID", "0"))
+REQUEST_CHANNEL_ID = int(os.getenv("REQUEST_CHANNEL_ID", "0"))
 
-FORCE JOIN IDs (USE CHAT IDS NOT USERNAME)
+# FORCE JOIN IDs (USE CHAT IDS NOT USERNAME)
+FORCE_CHANNEL_ID = int(os.getenv("FORCE_CHANNEL_ID", "0"))
+FORCE_GROUP_ID = int(os.getenv("FORCE_GROUP_ID", "0"))
 
-FORCE_CHANNEL_ID = int(os.getenv("FORCE_CHANNEL_ID"))
-FORCE_GROUP_ID = int(os.getenv("FORCE_GROUP_ID"))
-
-USERNAME ONLY FOR BUTTON LINKS
-
+# USERNAME ONLY FOR BUTTON LINKS
 FORCE_CHANNEL = os.getenv("FORCE_CHANNEL")
 FORCE_GROUP = os.getenv("FORCE_GROUP")
 
 if not BOT_TOKEN:
-print("BOT_TOKEN missing")
-sys.exit(1)
+    print("BOT_TOKEN missing")
+    sys.exit(1)
 
-#---------------- DATABASE ----------------
-
-conn = sqlite3.connect("movies.db")
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect("movies.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -57,188 +52,183 @@ message_id INTEGER
 
 conn.commit()
 
-#---------------- BOT CLASS ----------------
-
+# ---------------- BOT CLASS ----------------
 class MovieBot:
 
-def __init__(self, application):  
-    self.application = application  
+    def __init__(self, application):
+        self.application = application
 
-# ---------------- JOIN BUTTONS ---------------- #
-def join_buttons(self):  
+    # ---------------- JOIN BUTTONS ----------------
+    def join_buttons(self):
 
-    keyboard = [  
-        [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FORCE_CHANNEL.replace('@','')}")],  
-        [InlineKeyboardButton("💬 Join Group", url=f"https://t.me/{FORCE_GROUP.replace('@','')}")],  
-        [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]  
-    ]  
+        keyboard = [
+            [InlineKeyboardButton("📢 Join Channel",
+             url=f"https://t.me/{FORCE_CHANNEL.replace('@','')}")],
 
-    return InlineKeyboardMarkup(keyboard)  
+            [InlineKeyboardButton("💬 Join Group",
+             url=f"https://t.me/{FORCE_GROUP.replace('@','')}")],
 
-# ---------------- CHECK MEMBERSHIP ---------------- 
-async def check_membership(self, user_id, context):  
+            [InlineKeyboardButton("✅ I Joined", callback_data="check_join")]
+        ]
 
-    try:  
+        return InlineKeyboardMarkup(keyboard)
 
-        channel_member = await context.bot.get_chat_member(FORCE_CHANNEL_ID, user_id)  
-        group_member = await context.bot.get_chat_member(FORCE_GROUP_ID, user_id)  
+    # ---------------- CHECK MEMBERSHIP ----------------
+    async def check_membership(self, user_id, context):
 
-        if channel_member.status in ["left", "kicked"]:  
-            return False  
+        try:
+            channel_member = await context.bot.get_chat_member(FORCE_CHANNEL_ID, user_id)
+            group_member = await context.bot.get_chat_member(FORCE_GROUP_ID, user_id)
 
-        if group_member.status in ["left", "kicked"]:  
-            return False  
+            if channel_member.status in ["left", "kicked"]:
+                return False
 
-        return True  
+            if group_member.status in ["left", "kicked"]:
+                return False
 
-    except Exception as e:  
-        logger.error(f"Membership check error: {e}")  
-        return False  
+            return True
 
-# ---------------- START ----------------  
-async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):  
+        except Exception as e:
+            logger.error(f"Membership check error: {e}")
+            return False
 
-    user_id = update.effective_user.id  
+    # ---------------- START ----------------
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    joined = await self.check_membership(user_id, context)  
+        user_id = update.effective_user.id
 
-    if not joined:  
+        joined = await self.check_membership(user_id, context)
 
-        await update.message.reply_text(  
-            "🚫 You must join our channel and group to use this bot.",  
-            reply_markup=self.join_buttons()  
-        )  
-        return  
+        if not joined:
+            await update.message.reply_text(
+                "🚫 You must join our channel and group to use this bot.",
+                reply_markup=self.join_buttons()
+            )
+            return
 
-    await update.message.reply_text(  
-        "🎬 Movie Search Bot\n\nSend a movie name."  
-    )  
+        await update.message.reply_text(
+            "🎬 Movie Search Bot\n\nSend a movie name."
+        )
 
-# ---------------- BUTTON CHECK ----------------  
-async def check_join_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):  
+    # ---------------- BUTTON CHECK ----------------
+    async def check_join_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    query = update.callback_query  
-    user_id = query.from_user.id  
+        query = update.callback_query
+        user_id = query.from_user.id
 
-    await query.answer()  
+        await query.answer()
 
-    joined = await self.check_membership(user_id, context)  
+        joined = await self.check_membership(user_id, context)
 
-    if joined:  
+        if joined:
+            await query.edit_message_text(
+                "✅ Verification successful!\n\nNow send the movie name."
+            )
+        else:
+            await query.answer(
+                "❌ You still haven't joined the channel or group!",
+                show_alert=True
+            )
 
-        await query.edit_message_text(  
-            "✅ Verification successful!\n\nNow send the movie name."  
-        )  
+    # ---------------- SEARCH MOVIE ----------------
+    async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    else:  
+        user_id = update.effective_user.id
 
-        await query.answer(  
-            "❌ You still haven't joined the channel or group!",  
-            show_alert=True  
-        )  
+        joined = await self.check_membership(user_id, context)
 
-# ---------------- SEARCH MOVIE ----------------  
-async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):  
+        if not joined:
+            await update.message.reply_text(
+                "🚫 Please join our channel and group first.",
+                reply_markup=self.join_buttons()
+            )
+            return
 
-    user_id = update.effective_user.id  
+        query = update.message.text.lower()
 
-    joined = await self.check_membership(user_id, context)  
+        cursor.execute(
+            "SELECT message_id,file_name FROM movies WHERE file_name LIKE ?",
+            ('%' + query + '%',)
+        )
 
-    if not joined:  
+        results = cursor.fetchall()
 
-        await update.message.reply_text(  
-            "🚫 Please join our channel and group first.",  
-            reply_markup=self.join_buttons()  
-        )  
-        return  
+        if results:
 
-    query = update.message.text.lower()  
+            await update.message.reply_text("🎬 Movie found! Sending file...")
 
-    cursor.execute(  
-        "SELECT message_id,file_name FROM movies WHERE file_name LIKE ?",  
-        ('%' + query + '%',)  
-    )  
+            for message_id, name in results[:5]:
 
-    results = cursor.fetchall()  
+                await context.bot.forward_message(
+                    chat_id=user_id,
+                    from_chat_id=PRIVATE_GROUP_ID,
+                    message_id=message_id
+                )
 
-    if results:  
+        else:
 
-        await update.message.reply_text("🎬 Movie found! Sending file...")  
+            await update.message.reply_text(
+                "❌ Movie not found. Request sent."
+            )
 
-        for message_id, name in results[:3]:  
+            try:
+                await context.bot.send_message(
+                    chat_id=REQUEST_CHANNEL_ID,
+                    text=query
+                )
 
-            await context.bot.forward_message(  
-                chat_id=user_id,  
-                from_chat_id=PRIVATE_GROUP_ID,  
-                message_id=message_id  
-            )  
+            except Exception as e:
+                logger.error(f"Request channel error: {e}")
 
-    else:  
+    # ---------------- INDEX MOVIES ----------------
+    async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        await update.message.reply_text(  
-            "❌ Movie not found. Request sent."  
-        )  
+        if update.effective_chat.id != PRIVATE_GROUP_ID:
+            return
 
-        try:  
+        if not update.message.document:
+            return
 
-            await context.bot.send_message(  
-                chat_id=REQUEST_CHANNEL_ID,  
-                text=query  
-            )  
+        file_name = update.message.document.file_name.lower()
+        message_id = update.message.message_id
 
-        except Exception as e:  
+        cursor.execute(
+            "INSERT INTO movies VALUES (?,?)",
+            (file_name, message_id)
+        )
 
-            logger.error(f"Request channel error: {e}")  
+        conn.commit()
 
-# ---------------- INDEX MOVIES ----------------  
-async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):  
+        logger.info(f"Indexed movie: {file_name}")
 
-    if update.effective_chat.id != PRIVATE_GROUP_ID:  
-        return  
-
-    if not update.message.document:  
-        return  
-
-    file_name = update.message.document.file_name.lower()  
-    message_id = update.message.message_id  
-
-    cursor.execute(  
-        "INSERT INTO movies VALUES (?,?)",  
-        (file_name, message_id)  
-    )  
-
-    conn.commit()  
-
-    logger.info(f"Indexed movie: {file_name}")
-
-#---------------- MAIN ----------------
-
+# ---------------- MAIN ----------------
 def main():
 
-application = Application.builder().token(BOT_TOKEN).build()  
+    application = Application.builder().token(BOT_TOKEN).build()
 
-bot = MovieBot(application)  
+    bot = MovieBot(application)
 
-application.add_handler(CommandHandler("start", bot.start))  
+    application.add_handler(CommandHandler("start", bot.start))
 
-application.add_handler(  
-    CallbackQueryHandler(bot.check_join_button, pattern="check_join")  
-)  
+    application.add_handler(
+        CallbackQueryHandler(bot.check_join_button, pattern="check_join")
+    )
 
-application.add_handler(  
-    MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search_movie)  
-)  
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search_movie)
+    )
 
-application.add_handler(  
-    MessageHandler(  
-        filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL,  
-        bot.index_movie  
-    )  
-)  
+    application.add_handler(
+        MessageHandler(
+            filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL,
+            bot.index_movie
+        )
+    )
 
-logger.info("Bot running...")  
+    logger.info("Bot running...")
 
-application.run_polling()
+    application.run_polling()
 
-if name == "main":
-main()
+
+if __name__ == "__main__":
+    main()
