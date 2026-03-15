@@ -175,22 +175,14 @@ async def post_init(application: Application):
 
     application.create_task(cleanup_old_searches(bot))
 
-
 # ---------------- MAIN ----------------
-async def main():
+def main():
 
     logger.info("Starting Movie Bot")
 
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    application = Application.builder().token(BOT_TOKEN).build()
 
     bot = MovieBot(application)
-
-    application.bot_data["movie_bot"] = bot
 
     application.add_handler(CommandHandler("start", bot.start))
 
@@ -206,10 +198,18 @@ async def main():
         MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
     )
 
+    # Start cleanup task
+    application.job_queue.run_repeating(
+        lambda context: asyncio.create_task(cleanup_old_searches(bot)),
+        interval=300,
+        first=300,
+    )
+
     logger.info("Bot running...")
 
-    await application.run_polling(drop_pending_updates=True)
+    application.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
