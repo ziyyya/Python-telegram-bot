@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import sys
@@ -6,8 +5,6 @@ import sqlite3
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.constants import ParseMode
-
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(
@@ -21,6 +18,7 @@ logger = logging.getLogger(__name__)
 # ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
+REQUEST_CHANNEL_ID = os.getenv("REQUEST_CHANNEL_ID")
 
 if not BOT_TOKEN:
     print("BOT_TOKEN missing")
@@ -30,7 +28,12 @@ if not PRIVATE_GROUP_ID:
     print("PRIVATE_GROUP_ID missing")
     sys.exit(1)
 
+if not REQUEST_CHANNEL_ID:
+    print("REQUEST_CHANNEL_ID missing")
+    sys.exit(1)
+
 PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
+REQUEST_CHANNEL_ID = int(REQUEST_CHANNEL_ID)
 
 
 # ---------------- DATABASE ----------------
@@ -72,19 +75,32 @@ class MovieBot:
 
         results = cursor.fetchall()
 
-        if not results:
-            await update.message.reply_text("❌ Movie not found.")
+        # ---------- MOVIE FOUND ----------
+        if results:
+
+            await update.message.reply_text("🎬 Movie found! Sending file...")
+
+            for message_id, name in results[:3]:
+
+                await context.bot.forward_message(
+                    chat_id=update.effective_user.id,
+                    from_chat_id=PRIVATE_GROUP_ID,
+                    message_id=message_id
+                )
+
             return
 
-        await update.message.reply_text("🎬 Movie found! Sending file...")
+        # ---------- MOVIE NOT FOUND ----------
+        await update.message.reply_text("❌ Movie not found. Request sent.")
 
-        for message_id, name in results[:3]:
-
-            await context.bot.forward_message(
-                chat_id=update.effective_user.id,
-                from_chat_id=PRIVATE_GROUP_ID,
-                message_id=message_id
+        try:
+            await context.bot.send_message(
+                chat_id=REQUEST_CHANNEL_ID,
+                text=f"🎬 Movie Request:\n{query}"
             )
+
+        except Exception as e:
+            logger.error(f"Request channel error: {e}")
 
     # INDEX FILES
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
