@@ -43,7 +43,6 @@ class MovieBot:
         await update.message.reply_text(
             "🎬 *Movie Search Bot*\n\n"
             "Send a movie name and I'll search it.\n"
-            "_Hosted on Railway 🚀_\n\n"
             "Example: `Inception 2010`",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -63,7 +62,7 @@ class MovieBot:
 
             group_msg = await context.bot.send_message(
                 chat_id=PRIVATE_GROUP_ID,
-                text=f"{SEARCH_PREFIX}{movie_name}"
+                text=movie_name
             )
 
             self.group_message_ids[movie_name.lower()] = group_msg.message_id
