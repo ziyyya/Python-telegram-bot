@@ -14,11 +14,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------- ENV ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PRIVATE_GROUP_ID = os.getenv("PRIVATE_GROUP_ID")
 REQUEST_CHANNEL_ID = os.getenv("REQUEST_CHANNEL_ID")
+
+# FORCE JOIN USERNAMES
+FORCE_CHANNEL = os.getenv("FORCE_CHANNEL")   # example @mychannel
+FORCE_GROUP = os.getenv("FORCE_GROUP")       # example @mygroup
 
 if not BOT_TOKEN:
     print("BOT_TOKEN missing")
@@ -34,7 +37,6 @@ if not REQUEST_CHANNEL_ID:
 
 PRIVATE_GROUP_ID = int(PRIVATE_GROUP_ID)
 REQUEST_CHANNEL_ID = int(REQUEST_CHANNEL_ID)
-
 
 # ---------------- DATABASE ----------------
 conn = sqlite3.connect("movies.db")
@@ -56,15 +58,56 @@ class MovieBot:
     def __init__(self, application):
         self.application = application
 
-    # START
+    # ---------------- CHECK JOIN ----------------
+    async def check_membership(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        user_id = update.effective_user.id
+
+        try:
+            channel = await context.bot.get_chat_member(FORCE_CHANNEL, user_id)
+            group = await context.bot.get_chat_member(FORCE_GROUP, user_id)
+
+            if channel.status in ["left", "kicked"]:
+                return False
+
+            if group.status in ["left", "kicked"]:
+                return False
+
+            return True
+
+        except:
+            return False
+
+    # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        joined = await self.check_membership(update, context)
+
+        if not joined:
+            await update.message.reply_text(
+                "🚫 You must join our channel and group first!\n\n"
+                f"📢 Channel: https://t.me/{FORCE_CHANNEL.replace('@','')}\n"
+                f"💬 Group: https://t.me/{FORCE_GROUP.replace('@','')}\n\n"
+                "After joining send /start again."
+            )
+            return
 
         await update.message.reply_text(
             "🎬 Movie Search Bot\n\nSend a movie name."
         )
 
-    # SEARCH MOVIE
+    # ---------------- SEARCH MOVIE ----------------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+        joined = await self.check_membership(update, context)
+
+        if not joined:
+            await update.message.reply_text(
+                "🚫 Join our channel and group first!\n\n"
+                f"📢 https://t.me/{FORCE_CHANNEL.replace('@','')}\n"
+                f"💬 https://t.me/{FORCE_GROUP.replace('@','')}"
+            )
+            return
 
         query = update.message.text.lower()
 
@@ -91,7 +134,9 @@ class MovieBot:
             return
 
         # ---------- MOVIE NOT FOUND ----------
-        await update.message.reply_text("❌ Movie not found. Request sent next time we will add sorry😔.")
+        await update.message.reply_text(
+            "❌ Movie not found. Request sent. We will add it soon 😔"
+        )
 
         try:
             await context.bot.send_message(
@@ -102,7 +147,7 @@ class MovieBot:
         except Exception as e:
             logger.error(f"Request channel error: {e}")
 
-    # INDEX FILES
+    # ---------------- INDEX MOVIES ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
