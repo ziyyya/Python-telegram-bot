@@ -3,6 +3,7 @@ import os
 import sys
 import sqlite3
 import requests
+import re
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -40,6 +41,7 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS movies(
 file_name TEXT,
+search_name TEXT,
 message_id INTEGER UNIQUE,
 chat_id INTEGER
 )
@@ -48,21 +50,22 @@ chat_id INTEGER
 conn.commit()
 
 
+# ---------------- CLEAN SEARCH FUNCTION ----------------
+def clean_name(name):
+
+    name = name.lower()
+
+    name = re.sub(r"[._-]", " ", name)
+
+    name = re.sub(r"\s+", " ", name)
+
+    return name.strip()
+
+
 class MovieBot:
 
     def __init__(self, application):
         self.application = application
-
-    # ---------------- DELETE MESSAGE ----------------
-    async def delete_message(self, context):
-        job = context.job
-        try:
-            await context.bot.delete_message(
-                chat_id=job.data["chat_id"],
-                message_id=job.data["message_id"]
-            )
-        except:
-            pass
 
     # ---------------- POSTER ----------------
     async def send_movie_poster(self, update, movie):
@@ -71,6 +74,7 @@ class MovieBot:
             return
 
         try:
+
             url = "https://api.themoviedb.org/3/search/movie"
 
             params = {
@@ -96,7 +100,7 @@ class MovieBot:
             )
 
         except Exception as e:
-            logger.error(f"Poster error: {e}")
+            logger.error(e)
 
     # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,20 +112,30 @@ class MovieBot:
     # ---------------- SEARCH MOVIE ----------------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        movie = update.message.text.lower()
+        movie = clean_name(update.message.text)
 
         await self.send_movie_poster(update, movie)
 
-        cursor.execute(
-            "SELECT file_name FROM movies WHERE file_name LIKE ? LIMIT 50",
-            ('%' + movie + '%',)
-        )
+        words = movie.split()
+
+        query = " AND ".join(["search_name LIKE ?"] * len(words))
+
+        params = [f"%{w}%" for w in words]
+
+        sql = f"""
+        SELECT file_name
+        FROM movies
+        WHERE {query}
+        LIMIT 50
+        """
+
+        cursor.execute(sql, params)
 
         results = cursor.fetchall()
 
         if not results:
 
-            msg = await update.message.reply_text(
+            await update.message.reply_text(
                 "❌ Movie not found.\n\n📩 Request sent to admin."
             )
 
@@ -130,15 +144,6 @@ class MovieBot:
                     chat_id=REQUEST_CHANNEL_ID,
                     text=f"🎬 Movie Request:\n\n{movie}"
                 )
-
-            context.job_queue.run_once(
-                self.delete_message,
-                18000,
-                data={
-                    "chat_id": msg.chat_id,
-                    "message_id": msg.message_id
-                }
-            )
 
             return
 
@@ -195,10 +200,10 @@ class MovieBot:
                 """
                 SELECT message_id,chat_id,file_name
                 FROM movies
-                WHERE file_name LIKE ?
+                WHERE search_name LIKE ?
                 AND file_name LIKE ?
                 """,
-                ('%' + movie + '%', '%' + language + '%')
+                (f"%{movie}%", f"%{language}%")
             )
 
             results = cursor.fetchall()
@@ -234,93 +239,16 @@ class MovieBot:
         else:
             return
 
+        search_name = clean_name(file_name)
+
         cursor.execute(
-            "INSERT OR IGNORE INTO movies VALUES (?,?,?)",
-            (file_name, msg.message_id, update.effective_chat.id)
+            "INSERT OR IGNORE INTO movies VALUES (?,?,?,?)",
+            (file_name, search_name, msg.message_id, update.effective_chat.id)
         )
 
         conn.commit()
 
-        logger.info(f"Indexed: {file_name}")
-
-    # ---------------- MANUAL INDEX ----------------
-    async def index_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        msg = update.message.reply_to_message
-
-        if not msg:
-            await update.message.reply_text("Reply to a file to index it.")
-            return
-
-        if msg.document:
-            file_name = msg.document.file_name.lower()
-
-        elif msg.video:
-            file_name = (msg.video.file_name or "movie").lower()
-
-        else:
-            await update.message.reply_text("Reply to a movie file.")
-            return
-
-        cursor.execute(
-            "INSERT OR IGNORE INTO movies VALUES (?,?,?)",
-            (file_name, msg.message_id, msg.chat.id)
-        )
-
-        conn.commit()
-
-        await update.message.reply_text("✅ File indexed successfully!")
-
-    # ---------------- SCAN COMMAND ----------------
-    async def scan_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-        if update.effective_chat.id != PRIVATE_GROUP_ID:
-            await update.message.reply_text("❌ Use this in the private group.")
-            return
-
-        if not update.message.reply_to_message:
-            await update.message.reply_text("Reply to a message to start scanning.")
-            return
-
-        start = update.message.reply_to_message.message_id
-        indexed = 0
-
-        await update.message.reply_text("🔍 Scanning messages...")
-
-        for msg_id in range(start, start + 300):
-
-            try:
-
-                msg = await context.bot.copy_message(
-                    chat_id=update.effective_chat.id,
-                    from_chat_id=update.effective_chat.id,
-                    message_id=msg_id
-                )
-
-                if msg.document:
-                    name = msg.document.file_name.lower()
-
-                elif msg.video:
-                    name = (msg.video.file_name or "movie").lower()
-
-                else:
-                    continue
-
-                cursor.execute(
-                    "INSERT OR IGNORE INTO movies VALUES (?,?,?)",
-                    (name, msg.message_id, update.effective_chat.id)
-                )
-
-                conn.commit()
-                indexed += 1
-
-            except:
-                continue
-
-        await update.message.reply_text(
-            f"✅ Scan completed\n\nIndexed files: {indexed}"
-        )
-
+        logger.info(f"Indexed: {search_name}")
 
 # ---------------- MAIN ----------------
 def main():
@@ -330,8 +258,6 @@ def main():
     bot = MovieBot(application)
 
     application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CommandHandler("index", bot.index_command))
-    application.add_handler(CommandHandler("scan", bot.scan_command))
 
     application.add_handler(
         CallbackQueryHandler(bot.button_handler)
