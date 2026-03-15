@@ -158,16 +158,22 @@ async def cleanup_old_searches(bot):
         for uid in expired:
 
             try:
-
                 await bot.application.bot.send_message(
                     uid,
                     "⏰ Search expired. Try again."
                 )
-
             except:
                 pass
 
             bot.pending_searches.pop(uid, None)
+
+
+# ---------------- POST INIT ----------------
+async def post_init(application: Application):
+
+    bot = application.bot_data["movie_bot"]
+
+    application.create_task(cleanup_old_searches(bot))
 
 
 # ---------------- MAIN ----------------
@@ -175,9 +181,16 @@ async def main():
 
     logger.info("Starting Movie Bot")
 
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     bot = MovieBot(application)
+
+    application.bot_data["movie_bot"] = bot
 
     application.add_handler(CommandHandler("start", bot.start))
 
@@ -192,9 +205,6 @@ async def main():
     application.add_handler(
         MessageHandler(filters.Chat(PRIVATE_GROUP_ID) & filters.Document.ALL, bot.handle_group_document)
     )
-
-    # Correct background task
-    application.create_task(cleanup_old_searches(bot))
 
     logger.info("Bot running...")
 
