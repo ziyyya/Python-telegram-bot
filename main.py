@@ -48,16 +48,11 @@ chat_id INTEGER
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS requests(
-movie TEXT UNIQUE
-)
+CREATE INDEX IF NOT EXISTS idx_search ON movies(search_name)
 """)
 
-cursor.execute(
-    "CREATE INDEX IF NOT EXISTS idx_search ON movies(search_name)"
-)
-
 conn.commit()
+
 
 # ---------------- CLEAN SEARCH ----------------
 def clean_name(name):
@@ -120,7 +115,7 @@ class MovieBot:
             )
 
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Poster error: {e}")
 
     # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,7 +139,7 @@ class MovieBot:
 
         words = movie.split()
 
-        query = " AND ".join(["search_name LIKE ?"] * len(words))
+        query = " OR ".join(["search_name LIKE ?"] * len(words))
         params = [f"%{w}%" for w in words]
 
         sql = f"""
@@ -157,6 +152,7 @@ class MovieBot:
         cursor.execute(sql, params)
         results = cursor.fetchall()
 
+        # -------- MOVIE NOT FOUND --------
         if not results:
 
             msg = await update.message.reply_text(
@@ -169,28 +165,18 @@ class MovieBot:
                 data={"chat_id": msg.chat_id, "message_id": msg.message_id}
             )
 
-            cursor.execute(
-                "SELECT movie FROM requests WHERE movie=?",
-                (movie,)
-            )
-
-            if not cursor.fetchone() and REQUEST_CHANNEL_ID:
-
-                cursor.execute(
-                    "INSERT INTO requests VALUES (?)",
-                    (movie,)
-                )
-
-                conn.commit()
-
-                # SEND ONLY MOVIE NAME
-                await context.bot.send_message(
-                    chat_id=REQUEST_CHANNEL_ID,
-                    text=movie
-                )
+            if REQUEST_CHANNEL_ID:
+                try:
+                    await context.bot.send_message(
+                        chat_id=REQUEST_CHANNEL_ID,
+                        text=movie
+                    )
+                except Exception as e:
+                    logger.error(f"Request send failed: {e}")
 
             return
 
+        # -------- LANGUAGE DETECTION --------
         languages = set()
 
         for (name,) in results:
@@ -382,8 +368,7 @@ def main():
     logger.info("Bot running...")
 
     application.run_polling(
-        drop_pending_updates=True,
-        close_loop=False
+        drop_pending_updates=True
     )
 
 
