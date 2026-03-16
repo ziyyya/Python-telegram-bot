@@ -59,14 +59,11 @@ cursor.execute(
 
 conn.commit()
 
-
-# ---------------- CLEAN SEARCH FUNCTION ----------------
+# ---------------- CLEAN SEARCH ----------------
 def clean_name(name):
 
     name = name.lower()
-
     name = re.sub(r"[._-]", " ", name)
-
     name = re.sub(r"\s+", " ", name)
 
     return name.strip()
@@ -138,7 +135,7 @@ class MovieBot:
             data={"chat_id": msg.chat_id, "message_id": msg.message_id}
         )
 
-    # ---------------- SEARCH MOVIE ----------------
+    # ---------------- SEARCH ----------------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         movie = clean_name(update.message.text)
@@ -148,7 +145,6 @@ class MovieBot:
         words = movie.split()
 
         query = " AND ".join(["search_name LIKE ?"] * len(words))
-
         params = [f"%{w}%" for w in words]
 
         sql = f"""
@@ -179,9 +175,7 @@ class MovieBot:
                 (movie,)
             )
 
-            exists = cursor.fetchone()
-
-            if not exists and REQUEST_CHANNEL_ID:
+            if not cursor.fetchone() and REQUEST_CHANNEL_ID:
 
                 cursor.execute(
                     "INSERT INTO requests VALUES (?)",
@@ -205,13 +199,10 @@ class MovieBot:
 
             if "malayalam" in name:
                 languages.add("Malayalam")
-
             if "tamil" in name:
                 languages.add("Tamil")
-
             if "hindi" in name:
                 languages.add("Hindi")
-
             if "english" in name:
                 languages.add("English")
 
@@ -221,6 +212,7 @@ class MovieBot:
         buttons = []
 
         for lang in languages:
+
             buttons.append([
                 InlineKeyboardButton(
                     lang,
@@ -247,6 +239,7 @@ class MovieBot:
 
         data = query.data.split("|")
 
+        # -------- LANGUAGE --------
         if data[0] == "lang":
 
             movie = data[1]
@@ -254,7 +247,7 @@ class MovieBot:
 
             cursor.execute(
                 """
-                SELECT message_id,chat_id,file_name
+                SELECT file_name
                 FROM movies
                 WHERE search_name LIKE ?
                 AND file_name LIKE ?
@@ -264,11 +257,65 @@ class MovieBot:
 
             results = cursor.fetchall()
 
+            qualities = set()
+
+            for (name,) in results:
+
+                name = name.lower()
+
+                if "2160" in name or "4k" in name:
+                    qualities.add("4K")
+                if "1080" in name:
+                    qualities.add("1080p")
+                if "720" in name:
+                    qualities.add("720p")
+                if "480" in name:
+                    qualities.add("480p")
+
+            if not qualities:
+                qualities.add("File")
+
+            buttons = []
+
+            for q in qualities:
+
+                buttons.append([
+                    InlineKeyboardButton(
+                        q,
+                        callback_data=f"quality|{movie}|{language}|{q}"
+                    )
+                ])
+
+            await query.edit_message_text(
+                "🎥 Select Quality:",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+
+        # -------- QUALITY --------
+        elif data[0] == "quality":
+
+            movie = data[1]
+            language = data[2]
+            quality = data[3]
+
+            cursor.execute(
+                """
+                SELECT message_id,chat_id
+                FROM movies
+                WHERE search_name LIKE ?
+                AND file_name LIKE ?
+                AND file_name LIKE ?
+                """,
+                (f"%{movie}%", f"%{language}%", f"%{quality.lower()}%")
+            )
+
+            results = cursor.fetchall()
+
             if not results:
                 await query.edit_message_text("❌ File not found.")
                 return
 
-            for message_id, chat_id, _ in results[:5]:
+            for message_id, chat_id in results[:5]:
 
                 await context.bot.copy_message(
                     chat_id=query.from_user.id,
@@ -278,7 +325,7 @@ class MovieBot:
 
             await query.edit_message_text("✅ File sent!")
 
-    # ---------------- AUTO INDEX ----------------
+    # ---------------- INDEX ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
