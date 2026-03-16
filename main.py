@@ -155,7 +155,6 @@ class MovieBot:
         """
 
         cursor.execute(sql, params)
-
         results = cursor.fetchall()
 
         if not results:
@@ -184,6 +183,7 @@ class MovieBot:
 
                 conn.commit()
 
+                # SEND ONLY MOVIE NAME
                 await context.bot.send_message(
                     chat_id=REQUEST_CHANNEL_ID,
                     text=movie
