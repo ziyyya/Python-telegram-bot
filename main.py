@@ -47,6 +47,16 @@ chat_id INTEGER
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS requests(
+movie TEXT UNIQUE
+)
+""")
+
+cursor.execute(
+    "CREATE INDEX IF NOT EXISTS idx_search ON movies(search_name)"
+)
+
 conn.commit()
 
 
@@ -66,6 +76,19 @@ class MovieBot:
 
     def __init__(self, application):
         self.application = application
+
+    # ---------------- AUTO DELETE ----------------
+    async def auto_delete(self, context):
+
+        job = context.job
+
+        try:
+            await context.bot.delete_message(
+                chat_id=job.data["chat_id"],
+                message_id=job.data["message_id"]
+            )
+        except:
+            pass
 
     # ---------------- POSTER ----------------
     async def send_movie_poster(self, update, movie):
@@ -105,8 +128,14 @@ class MovieBot:
     # ---------------- START ----------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "🎬 Movie Search Bot\n\nSend a movie name."
+        )
+
+        context.job_queue.run_once(
+            self.auto_delete,
+            18000,
+            data={"chat_id": msg.chat_id, "message_id": msg.message_id}
         )
 
     # ---------------- SEARCH MOVIE ----------------
@@ -135,11 +164,32 @@ class MovieBot:
 
         if not results:
 
-            await update.message.reply_text(
+            msg = await update.message.reply_text(
                 "❌ Movie not found.\n\n📩 Request sent to admin."
             )
 
-            if REQUEST_CHANNEL_ID:
+            context.job_queue.run_once(
+                self.auto_delete,
+                18000,
+                data={"chat_id": msg.chat_id, "message_id": msg.message_id}
+            )
+
+            cursor.execute(
+                "SELECT movie FROM requests WHERE movie=?",
+                (movie,)
+            )
+
+            exists = cursor.fetchone()
+
+            if not exists and REQUEST_CHANNEL_ID:
+
+                cursor.execute(
+                    "INSERT INTO requests VALUES (?)",
+                    (movie,)
+                )
+
+                conn.commit()
+
                 await context.bot.send_message(
                     chat_id=REQUEST_CHANNEL_ID,
                     text=f"🎬 Movie Request:\n\n{movie}"
@@ -178,9 +228,15 @@ class MovieBot:
                 )
             ])
 
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "🌐 Select Language:",
             reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        context.job_queue.run_once(
+            self.auto_delete,
+            18000,
+            data={"chat_id": msg.chat_id, "message_id": msg.message_id}
         )
 
     # ---------------- BUTTON HANDLER ----------------
@@ -222,7 +278,7 @@ class MovieBot:
 
             await query.edit_message_text("✅ File sent!")
 
-    # ---------------- AUTO INDEX NEW FILES ----------------
+    # ---------------- AUTO INDEX ----------------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
@@ -249,6 +305,7 @@ class MovieBot:
         conn.commit()
 
         logger.info(f"Indexed: {search_name}")
+
 
 # ---------------- MAIN ----------------
 def main():
@@ -277,7 +334,10 @@ def main():
 
     logger.info("Bot running...")
 
-    application.run_polling(drop_pending_updates=True)
+    application.run_polling(
+        drop_pending_updates=True,
+        close_loop=False
+    )
 
 
 if __name__ == "__main__":
