@@ -186,7 +186,7 @@ class MovieBot:
 
                 await context.bot.send_message(
                     chat_id=REQUEST_CHANNEL_ID,
-                    text=f"🎬 Movie Request:\n\n{movie}"
+                    text=movie
                 )
 
             return
