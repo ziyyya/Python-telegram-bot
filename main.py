@@ -53,6 +53,7 @@ cursor.execute(
 
 conn.commit()
 
+
 # ---------------- CLEAN SEARCH ----------------
 def clean_name(name):
 
@@ -75,7 +76,6 @@ class MovieBot:
             return
 
         try:
-
             url = "https://api.themoviedb.org/3/search/movie"
 
             params = {
@@ -132,7 +132,6 @@ class MovieBot:
         cursor.execute(sql, params)
         results = cursor.fetchall()
 
-        # -------- MOVIE NOT FOUND --------
         if not results:
 
             await update.message.reply_text(
@@ -159,10 +158,13 @@ class MovieBot:
 
             if "malayalam" in name:
                 languages.add("Malayalam")
+
             if "tamil" in name:
                 languages.add("Tamil")
+
             if "hindi" in name:
                 languages.add("Hindi")
+
             if "english" in name:
                 languages.add("English")
 
@@ -204,9 +206,8 @@ class MovieBot:
                 SELECT file_name
                 FROM movies
                 WHERE search_name LIKE ?
-                AND file_name LIKE ?
                 """,
-                (f"%{movie}%", f"%{language}%")
+                (f"%{movie}%",)
             )
 
             results = cursor.fetchall()
@@ -217,13 +218,20 @@ class MovieBot:
 
                 name = name.lower()
 
+                # only files containing selected language
+                if language not in name:
+                    continue
+
                 if "2160" in name or "4k" in name:
                     qualities.add("4K")
-                if "1080" in name:
+
+                elif "1080" in name:
                     qualities.add("1080p")
-                if "720" in name:
+
+                elif "720" in name:
                     qualities.add("720p")
-                if "480" in name:
+
+                elif "480" in name:
                     qualities.add("480p")
 
             if not qualities:
@@ -254,22 +262,34 @@ class MovieBot:
 
             cursor.execute(
                 """
-                SELECT message_id,chat_id
+                SELECT message_id,chat_id,file_name
                 FROM movies
                 WHERE search_name LIKE ?
-                AND file_name LIKE ?
-                AND file_name LIKE ?
                 """,
-                (f"%{movie}%", f"%{language}%", f"%{quality.lower()}%")
+                (f"%{movie}%",)
             )
 
             results = cursor.fetchall()
 
-            if not results:
+            files = []
+
+            for message_id, chat_id, name in results:
+
+                name = name.lower()
+
+                if language not in name:
+                    continue
+
+                if quality != "File" and quality.lower() not in name:
+                    continue
+
+                files.append((message_id, chat_id))
+
+            if not files:
                 await query.edit_message_text("❌ File not found.")
                 return
 
-            for message_id, chat_id in results[:5]:
+            for message_id, chat_id in files[:5]:
 
                 await context.bot.copy_message(
                     chat_id=query.from_user.id,
