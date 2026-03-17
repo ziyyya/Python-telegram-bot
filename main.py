@@ -20,7 +20,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
-
 logger = logging.getLogger(__name__)
 
 # ---------------- ENV ----------------
@@ -47,20 +46,17 @@ chat_id INTEGER
 )
 """)
 
-cursor.execute(
-    "CREATE INDEX IF NOT EXISTS idx_search ON movies(search_name)"
-)
-
+cursor.execute("CREATE INDEX IF NOT EXISTS idx_search ON movies(search_name)")
 conn.commit()
 
-# ---------------- CLEAN SEARCH ----------------
+# ---------------- CLEAN ----------------
 def clean_name(name):
     name = name.lower()
     name = re.sub(r"[._-]", " ", name)
     name = re.sub(r"\s+", " ", name)
     return name.strip()
 
-# ---------------- LANGUAGE MAP ----------------
+# ---------------- LANG ----------------
 LANG_MAP = {
     "malayalam": ["malayalam", "mal"],
     "tamil": ["tamil", "tam"],
@@ -69,110 +65,84 @@ LANG_MAP = {
     "english": ["english", "eng"]
 }
 
+# ---------------- BOT ----------------
 class MovieBot:
 
-    def __init__(self, application):
-        self.application = application
+    def __init__(self, app):
+        self.app = app
 
-    # ---------------- POSTER ----------------
-    async def send_movie_poster(self, update, movie):
+    # -------- POSTER --------
+    async def send_poster_selection(self, update, user_input):
+
         if not TMDB_API_KEY:
-            return
+            return False
 
         try:
+            raw = clean_name(user_input)
+
+            movie = re.sub(
+                r"\b(malayalam|mal|tamil|tam|hindi|hin|kannada|kan|english|eng|movie)\b",
+                "",
+                raw
+            ).strip()
+
             url = "https://api.themoviedb.org/3/search/movie"
-            params = {"api_key": TMDB_API_KEY, "query": movie}
 
-            r = requests.get(url, params=params, timeout=10).json()
+            params = {
+                "api_key": TMDB_API_KEY,
+                "query": movie,
+                "include_adult": False
+            }
 
-            if not r.get("results"):
-                return
+            res = requests.get(url, params=params, timeout=10).json()
+            results = res.get("results", [])[:5]
 
-            poster = r["results"][0].get("poster_path")
-            if not poster:
-                return
+            if not results:
+                return False
 
-            poster_url = f"https://image.tmdb.org/t/p/w500{poster}"
+            for r in results:
+                poster = r.get("poster_path")
+                if not poster:
+                    continue
 
-            await update.message.reply_photo(
-                photo=poster_url,
-                caption=f"🎬 {movie.title()}"
-            )
+                poster_url = f"https://image.tmdb.org/t/p/w500{poster}"
+                title = r.get("title", "Unknown")
+                year = r.get("release_date", "----")[:4]
+                movie_id = r.get("id")
+
+                buttons = [[InlineKeyboardButton(
+                    "✅ Select",
+                    callback_data=f"select|{movie_id}|{user_input}"
+                )]]
+
+                await update.message.reply_photo(
+                    photo=poster_url,
+                    caption=f"🎬 {title} ({year})",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+
+            return True
 
         except Exception as e:
             logger.error(f"Poster error: {e}")
+            return False
 
-    # ---------------- START ----------------
+    # -------- START --------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
-            "🎬 Movie Search Bot\n\nSend a movie name."
-        )
+        await update.message.reply_text("🎬 Send movie name")
 
-    # ---------------- SEARCH ----------------
+    # -------- SEARCH --------
     async def search_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        movie = clean_name(update.message.text)
-        await self.send_movie_poster(update, movie)
+        user_input = update.message.text
 
-        words = movie.split()
-        query = " OR ".join(["search_name LIKE ?"] * len(words))
-        params = [f"%{w}%" for w in words]
-
-        sql = f"""
-        SELECT file_name
-        FROM movies
-        WHERE {query}
-        LIMIT 50
-        """
-
-        cursor.execute(sql, params)
-        results = cursor.fetchall()
-
-        if not results:
-            await update.message.reply_text(
-                "❌ Movie not found.\n\n📩 Request sent to admin."
-            )
-
-            if REQUEST_CHANNEL_ID:
-                await context.bot.send_message(
-                    chat_id=REQUEST_CHANNEL_ID,
-                    text=movie
-                )
+        ok = await self.send_poster_selection(update, user_input)
+        if ok:
             return
 
-        # -------- LANGUAGE DETECTION --------
-        languages = set()
+        await update.message.reply_text("❌ No poster found")
 
-        for (name,) in results:
-            name = name.lower()
-
-            # Detect normal languages
-            for lang, keywords in LANG_MAP.items():
-                if any(k in name for k in keywords):
-                    languages.add(lang.capitalize())
-
-            # Detect multi audio
-            if any(x in name for x in ["multi", "dual", "+"]):
-                languages.add("Multi Audio")
-
-        if not languages:
-            languages.add("Movie")
-
-        buttons = []
-        for lang in languages:
-            buttons.append([
-                InlineKeyboardButton(
-                    lang,
-                    callback_data=f"lang|{movie}|{lang.lower()}"
-                )
-            ])
-
-        await update.message.reply_text(
-            "🌐 Select Language:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-
-    # ---------------- BUTTON HANDLER ----------------
+    # -------- BUTTON --------
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         query = update.callback_query
@@ -180,24 +150,72 @@ class MovieBot:
 
         data = query.data.split("|")
 
-        # -------- LANGUAGE --------
-        if data[0] == "lang":
+        # -------- SELECT --------
+        if data[0] == "select":
 
-            movie = data[1]
-            language = data[2]
+            user_input = data[2]
+            movie = clean_name(user_input)
+            words = movie.split()
+
+            # ✅ STRICT AND SEARCH
+            sql = " AND ".join(["search_name LIKE ?"] * len(words))
+            params = [f"%{w}%" for w in words]
+
+            cursor.execute(f"SELECT file_name FROM movies WHERE {sql}", params)
+            results = cursor.fetchall()
+
+            if not results:
+                await query.message.reply_text("❌ Movie not found in DB\nWe will receive your request📩.\n Next time, we will add it📌.\nMaybe, please check your spelling and try searching again😊")
+                return
+
+            languages = set()
+
+            for (name,) in results:
+                name = name.lower()
+
+                # ✅ DOUBLE CHECK MATCH
+                if not all(w in name for w in words):
+                    continue
+
+                for lang, keys in LANG_MAP.items():
+                    if any(k in name for k in keys):
+                        languages.add(lang.capitalize())
+
+                if any(x in name for x in ["multi", "dual", "+"]):
+                    languages.add("Multi Audio")
+
+            if not languages:
+                languages.add("Movie")
+
+            buttons = [[InlineKeyboardButton(
+                l, callback_data=f"lang|{movie}|{l.lower()}"
+            )] for l in languages]
+
+            await query.message.reply_text(
+                "🌐 Select Language:",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+
+        # -------- LANGUAGE --------
+        elif data[0] == "lang":
+
+            movie, language = data[1], data[2]
+            words = movie.split()
 
             cursor.execute(
                 "SELECT file_name FROM movies WHERE search_name LIKE ?",
                 (f"%{movie}%",)
             )
-
             results = cursor.fetchall()
+
             qualities = set()
 
             for (name,) in results:
                 name = name.lower()
 
-                # Multi audio
+                if not all(w in name for w in words):
+                    continue
+
                 if language == "multi audio":
                     if not any(x in name for x in ["multi", "dual", "+"]):
                         continue
@@ -217,14 +235,9 @@ class MovieBot:
             if not qualities:
                 qualities.add("File")
 
-            buttons = []
-            for q in qualities:
-                buttons.append([
-                    InlineKeyboardButton(
-                        q,
-                        callback_data=f"quality|{movie}|{language}|{q}"
-                    )
-                ])
+            buttons = [[InlineKeyboardButton(
+                q, callback_data=f"quality|{movie}|{language}|{q}"
+            )] for q in qualities]
 
             await query.edit_message_text(
                 "🎥 Select Quality:",
@@ -234,20 +247,22 @@ class MovieBot:
         # -------- QUALITY --------
         elif data[0] == "quality":
 
-            movie = data[1]
-            language = data[2]
-            quality = data[3]
+            movie, language, quality = data[1], data[2], data[3]
+            words = movie.split()
 
             cursor.execute(
                 "SELECT message_id,chat_id,file_name FROM movies WHERE search_name LIKE ?",
                 (f"%{movie}%",)
             )
-
             results = cursor.fetchall()
+
             files = []
 
-            for message_id, chat_id, name in results:
+            for msg_id, chat_id, name in results:
                 name = name.lower()
+
+                if not all(w in name for w in words):
+                    continue
 
                 if language == "multi audio":
                     if not any(x in name for x in ["multi", "dual", "+"]):
@@ -259,22 +274,22 @@ class MovieBot:
                 if quality != "File" and quality.lower() not in name:
                     continue
 
-                files.append((message_id, chat_id))
+                files.append((msg_id, chat_id))
 
             if not files:
-                await query.edit_message_text("❌ File not found.\n  😔Sorry we will receive your request.\n 😊Next time, we will add it.")
+                await query.edit_message_text("❌ File not found")
                 return
 
-            for message_id, chat_id in files[:5]:
+            for msg_id, chat_id in files[:5]:
                 await context.bot.copy_message(
                     chat_id=query.from_user.id,
                     from_chat_id=chat_id,
-                    message_id=message_id
+                    message_id=msg_id
                 )
 
             await query.edit_message_text("✅ File sent!")
 
-    # ---------------- INDEX ----------------
+    # -------- INDEX --------
     async def index_movie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if update.effective_chat.id != PRIVATE_GROUP_ID:
@@ -297,23 +312,22 @@ class MovieBot:
         )
 
         conn.commit()
-
         logger.info(f"Indexed: {search_name}")
 
 # ---------------- MAIN ----------------
 def main():
 
-    application = Application.builder().token(BOT_TOKEN).build()
-    bot = MovieBot(application)
+    app = Application.builder().token(BOT_TOKEN).build()
+    bot = MovieBot(app)
 
-    application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CallbackQueryHandler(bot.button_handler))
+    app.add_handler(CommandHandler("start", bot.start))
+    app.add_handler(CallbackQueryHandler(bot.button_handler))
 
-    application.add_handler(
+    app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, bot.search_movie)
     )
 
-    application.add_handler(
+    app.add_handler(
         MessageHandler(
             filters.Chat(PRIVATE_GROUP_ID) &
             (filters.Document.ALL | filters.VIDEO),
@@ -322,7 +336,7 @@ def main():
     )
 
     logger.info("Bot running...")
-    application.run_polling(drop_pending_updates=True)
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
