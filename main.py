@@ -71,7 +71,7 @@ class MovieBot:
     def __init__(self, app):
         self.app = app
 
-    # -------- POSTER --------
+    # -------- POSTER (FIXED) --------
     async def send_poster_selection(self, update, user_input):
 
         if not TMDB_API_KEY:
@@ -80,6 +80,11 @@ class MovieBot:
         try:
             raw = clean_name(user_input)
 
+            # 🎯 detect language
+            lang_words = ["malayalam", "tamil", "hindi", "kannada", "english"]
+            has_lang = any(l in raw for l in lang_words)
+
+            # remove language words
             movie = re.sub(
                 r"\b(malayalam|mal|tamil|tam|hindi|hin|kannada|kan|english|eng|movie)\b",
                 "",
@@ -95,20 +100,24 @@ class MovieBot:
             }
 
             res = requests.get(url, params=params, timeout=10).json()
-            results = res.get("results", [])[:5]
+            results = res.get("results", [])
 
             if not results:
                 return False
 
-            for r in results:
-                poster = r.get("poster_path")
+            # ✅ LANGUAGE SEARCH → ONLY 1 POSTER
+            if has_lang:
+
+                best = results[0]
+
+                poster = best.get("poster_path")
                 if not poster:
-                    continue
+                    return False
 
                 poster_url = f"https://image.tmdb.org/t/p/w500{poster}"
-                title = r.get("title", "Unknown")
-                year = r.get("release_date", "----")[:4]
-                movie_id = r.get("id")
+                title = best.get("title", "Unknown")
+                year = best.get("release_date", "----")[:4]
+                movie_id = best.get("id")
 
                 buttons = [[InlineKeyboardButton(
                     "✅ Select",
@@ -121,7 +130,33 @@ class MovieBot:
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
 
-            return True
+                return True
+
+            # ✅ NORMAL SEARCH → MULTIPLE POSTERS
+            else:
+                for r in results[:5]:
+
+                    poster = r.get("poster_path")
+                    if not poster:
+                        continue
+
+                    poster_url = f"https://image.tmdb.org/t/p/w500{poster}"
+                    title = r.get("title", "Unknown")
+                    year = r.get("release_date", "----")[:4]
+                    movie_id = r.get("id")
+
+                    buttons = [[InlineKeyboardButton(
+                        "✅ Select",
+                        callback_data=f"select|{movie_id}|{user_input}"
+                    )]]
+
+                    await update.message.reply_photo(
+                        photo=poster_url,
+                        caption=f"🎬 {title} ({year})",
+                        reply_markup=InlineKeyboardMarkup(buttons)
+                    )
+
+                return True
 
         except Exception as e:
             logger.error(f"Poster error: {e}")
@@ -157,7 +192,6 @@ class MovieBot:
             movie = clean_name(user_input)
             words = movie.split()
 
-            # ✅ STRICT AND SEARCH
             sql = " AND ".join(["search_name LIKE ?"] * len(words))
             params = [f"%{w}%" for w in words]
 
@@ -165,7 +199,7 @@ class MovieBot:
             results = cursor.fetchall()
 
             if not results:
-                await query.message.reply_text("❌ Movie not found in DB\nWe will receive your request📩.\n Next time, we will add it📌.\nMaybe, please check your spelling and try searching again😊")
+                await query.message.reply_text("❌ Movie not found in DB")
                 return
 
             languages = set()
@@ -173,7 +207,6 @@ class MovieBot:
             for (name,) in results:
                 name = name.lower()
 
-                # ✅ DOUBLE CHECK MATCH
                 if not all(w in name for w in words):
                     continue
 
@@ -277,7 +310,7 @@ class MovieBot:
                 files.append((msg_id, chat_id))
 
             if not files:
-                await query.edit_message_text("❌ File not found")
+                await query.edit_message_text("❌ File not found\nThanks for your request. We’ll try to include it in the next📌\nMaybe,Please check your spelling and try searching again😊\n")
                 return
 
             for msg_id, chat_id in files[:5]:
